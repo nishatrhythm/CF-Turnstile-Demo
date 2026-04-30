@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CFT Verification Demo</title>
+    <link rel="icon" type="image/svg+xml" href="https://developers.cloudflare.com/_astro/logo.DAG2yejx.svg">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+</head>
+<body>
+    <div class="container">
+
+        <header>
+            <div class="logo">
+                <img src="https://developers.cloudflare.com/_astro/logo.DAG2yejx.svg" alt="Cloudflare">
+            </div>
+            <h1>
+                <span class="title-desktop">How Cloudflare Verifies Turnstile Tokens</span>
+                <span class="title-mobile">How CF Verifies Turnstile</span>
+            </h1>
+            <p class="subtitle">A live walkthrough of the round-trip from browser to server to Cloudflare.</p>
+        </header>
+
+        <section class="flow-diagram">
+            <div class="flow-step">
+                <div class="flow-icon"><i data-lucide="monitor"></i></div>
+                <div class="flow-label">Browser</div>
+                <div class="flow-sub">Renders widget</div>
+            </div>
+            <div class="flow-arrow"><i data-lucide="arrow-right"></i></div>
+            <div class="flow-step">
+                <div class="flow-icon"><i data-lucide="key-round"></i></div>
+                <div class="flow-label">Token</div>
+                <div class="flow-sub">Generated client-side</div>
+            </div>
+            <div class="flow-arrow"><i data-lucide="arrow-right"></i></div>
+            <div class="flow-step">
+                <div class="flow-icon"><i data-lucide="server"></i></div>
+                <div class="flow-label">Your server</div>
+                <div class="flow-sub">Receives token</div>
+            </div>
+            <div class="flow-arrow"><i data-lucide="arrow-right"></i></div>
+            <div class="flow-step">
+                <div class="flow-icon"><i data-lucide="cloud"></i></div>
+                <div class="flow-label">Cloudflare</div>
+                <div class="flow-sub">Validates &amp; responds</div>
+            </div>
+        </section>
+
+        <section class="scenario-section">
+            <div class="section-title">
+                <i data-lucide="sparkles"></i>
+                <h2>Pick a scenario to try</h2>
+            </div>
+            <div class="scenario-grid">
+                {% for id, s in scenarios.items() %}
+                    <button class="scenario-btn" data-scenario="{{ id }}">
+                        <div class="scenario-header">
+                            {% if s.expected == 'success' %}
+                                <span class="scenario-badge ok"><i data-lucide="check"></i> Pass</span>
+                            {% else %}
+                                <span class="scenario-badge err"><i data-lucide="x"></i> Fail</span>
+                            {% endif %}
+                            <span class="scenario-title">{{ s.title }}</span>
+                        </div>
+                        <p class="scenario-desc">{{ s.description }}</p>
+                    </button>
+                {% endfor %}
+                <button class="scenario-btn custom" data-scenario="custom">
+                    <div class="scenario-header">
+                        <span class="scenario-badge neutral"><i data-lucide="settings-2"></i> Custom</span>
+                        <span class="scenario-title">Build your own</span>
+                    </div>
+                    <p class="scenario-desc">Manually pick any sitekey and secret to test custom combinations.</p>
+                </button>
+            </div>
+        </section>
+
+        <section class="status-bar" id="status-bar">
+            <div class="status-dot"></div>
+            <span id="status-text">Pick a scenario to begin.</span>
+        </section>
+
+        <section class="panels">
+
+            <div class="panel browser-panel">
+                <div class="panel-header">
+                    <i data-lucide="monitor"></i>
+                    <h3>Browser</h3>
+                    <span class="panel-tag">Client-side</span>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <span>Sitekey</span>
+                        <span class="field-hint">Public, safe to expose</span>
+                    </div>
+                    <select id="sitekey-select" class="select">
+                        <option value="">— Choose a sitekey —</option>
+                        {% for id, info in sitekeys.items() %}
+                            <option value="{{ id }}">{{ info.label }}</option>
+                        {% endfor %}
+                    </select>
+                    <div id="sitekey-value" class="field-value" style="display:none;"></div>
+                </div>
+
+                <div class="widget-area" id="widget-area" style="display:none;">
+                    <div class="field-label">
+                        <span>Turnstile widget</span>
+                        <span class="field-hint">Generates the token</span>
+                    </div>
+                    <div id="turnstile-container"></div>
+                    <div id="invisible-notice" class="inline-note" style="display:none;">
+                        <i data-lucide="eye-off"></i>
+                        <span>Invisible widget — token is generated automatically.</span>
+                    </div>
+                </div>
+
+                <div id="token-block" class="token-block" style="display:none;">
+                    <div class="field-label">
+                        <span>Generated token</span>
+                        <span class="field-hint">Sent to your server next</span>
+                    </div>
+                    <pre id="token-value"></pre>
+                </div>
+            </div>
+
+            <div class="panel-arrow">
+                <i data-lucide="arrow-right"></i>
+            </div>
+
+            <div class="panel server-panel">
+                <div class="panel-header">
+                    <i data-lucide="server"></i>
+                    <h3>Server</h3>
+                    <span class="panel-tag">Backend</span>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <span>Secret key</span>
+                        <span class="field-hint">Private, never share</span>
+                    </div>
+                    <select id="secret-select" class="select">
+                        <option value="">— Choose a secret —</option>
+                        {% for id, info in secrets.items() %}
+                            <option value="{{ id }}">{{ info.label }}</option>
+                        {% endfor %}
+                    </select>
+                    <div id="secret-value" class="field-value" style="display:none;"></div>
+                </div>
+
+                <div class="verify-area">
+                    <button id="verify-btn" disabled>
+                        <i data-lucide="search-check"></i>
+                        <span>Verify with Cloudflare</span>
+                    </button>
+                    <p class="verify-hint">Sends the token + secret to <code>/siteverify</code></p>
+                </div>
+
+                <div id="result-area" class="result-area" style="display:none;">
+                    <div id="result-status"></div>
+                    <div id="result-summary" class="result-summary"></div>
+                    <details class="result-details">
+                        <summary>
+                            <i data-lucide="chevron-right"></i>
+                            <span>View raw Cloudflare response</span>
+                        </summary>
+                        <pre id="result-json"></pre>
+                    </details>
+                </div>
+            </div>
+
+        </section>
+
+        <section class="reference">
+            <div class="section-title">
+                <i data-lucide="book-open"></i>
+                <h2>Error code reference</h2>
+            </div>
+            <div class="error-list">
+                {% for code, desc in error_codes.items() %}
+                    <div class="error-item">
+                        <code>{{ code }}</code>
+                        <span>{{ desc }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <footer>
+            <div class="footer-links">
+                <a href="https://developers.cloudflare.com/turnstile/troubleshooting/testing/" target="_blank">
+                    <i data-lucide="external-link"></i>
+                    <span>Cloudflare Turnstile Docs</span>
+                </a>
+                <span class="footer-divider">·</span>
+                <a href="https://github.com/nishatrhythm/CF-Turnstile-Demo" target="_blank">
+                    <img src="https://cdn.simpleicons.org/github/181717" alt="" aria-hidden="true">
+                    <span>View on GitHub</span>
+                </a>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        window.SITEKEYS = {{ sitekeys | tojson }};
+        window.SECRETS = {{ secrets | tojson }};
+        window.SCENARIOS = {{ scenarios | tojson }};
+        window.ERROR_CODES = {{ error_codes | tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script>lucide.createIcons();</script>
+</body>
+</html>
